@@ -11,29 +11,32 @@ from lerobot.utils.utils import log_say
 logging.basicConfig(level=logging.WARNING)
 
 FPS = 30
-REPO_ID = "dkhanh/ur5e_data_collect"
-STATE_DIM = 7   
-ACTION_DIM = 4  
+REPO_ID = "dkhanh/ur5e_data_collect-3"
+STATE_DIM = 13   
+ACTION_DIM = 7  
 
 
 class RecordConfig:
     def __init__(self):
-        self.num_episodes = 1
+        self.num_episodes = 3
         self.display = False
-        self.task_description = "put the blocks to the box"
-        self.episode_time_sec = 60
+        self.task_description = "put the cylinder on top of the cube"
+        self.episode_time_sec = 40
         self.reset_time_sec = 10
         self.push_to_hub = False
-
 
 def build_dataset_features() -> dict:
     return {
         "observation.state": {
             "dtype": "float32",
             "shape": (STATE_DIM,),
-            "names": ["tcp_pos.x", "tcp_pos.y", "tcp_pos.z",
-                      "tcp_pos.r", "tcp_pos.p", "tcp_pos.yaw",
-                      "gripper.pos"],
+            "names": [
+                "tcp_pos.x", "tcp_pos.y", "tcp_pos.z",
+                "tcp_pos.r", "tcp_pos.p", "tcp_pos.yaw",
+                "joint.q0", "joint.q1", "joint.q2",
+                "joint.q3", "joint.q4", "joint.q5",
+                "gripper.pos",
+            ],
         },
         "observation.images.scene": {
             "dtype": "video",
@@ -43,7 +46,11 @@ def build_dataset_features() -> dict:
         "action": {
             "dtype": "float32",
             "shape": (ACTION_DIM,),
-            "names": ["vx", "vy", "vz", "gripper.pos"],
+            "names": [
+                "joint.q0", "joint.q1", "joint.q2",
+                "joint.q3", "joint.q4", "joint.q5",
+                "gripper.pos",
+            ],
         },
     }
 
@@ -52,13 +59,16 @@ def obs_to_state(obs: dict) -> np.ndarray:
     return np.array([
         obs["tcp_pos.x"], obs["tcp_pos.y"], obs["tcp_pos.z"],
         obs["tcp_pos.r"], obs["tcp_pos.p"], obs["tcp_pos.yaw"],
+        obs["joint.q0"],  obs["joint.q1"],  obs["joint.q2"],
+        obs["joint.q3"],  obs["joint.q4"],  obs["joint.q5"],
         obs["gripper.pos"],
     ], dtype=np.float32)
 
 
 def action_to_vector(action: dict) -> np.ndarray:
     return np.array([
-        action["vx"],  action["vy"],  action["vz"],
+        action["joint.q0"], action["joint.q1"], action["joint.q2"],
+        action["joint.q3"], action["joint.q4"], action["joint.q5"],
         action["gripper.pos"],
     ], dtype=np.float32)
 
@@ -174,6 +184,9 @@ def main(record_cfg: RecordConfig):
         dataset.save_episode()
         print(f"Episode {episode_idx + 1} saved.")
         episode_idx += 1
+
+        print("Returning to home position...")
+        robot.go_home()
 
         # --- Reset phase (skip after last episode) ---
         if episode_idx < record_cfg.num_episodes and not events["stop_recording"]:

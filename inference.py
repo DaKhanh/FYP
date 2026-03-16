@@ -1,22 +1,24 @@
 import numpy as np
-import config_ur5e_joints as ur5e_cfg
-import ur5e_joints 
+import ur5e
+import config_ur5e 
 import socket
+import time
 import pickle
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
 
-TASK_DESCRIPTION = "pick the cube and place it on the table"
-REPO_ID = "dkhanh/xvla-pick-red-cube"
-DATASET = "dkhanh/pick-red-cube"
+TASK_DESCRIPTION = "put the cylinder on top of the cube"
 HOST = "10.97.26.171"  # Remote GPU IP
-PORT = 5001
+PORT = 5002
+FPS=30
 
-def pack_state_from_robot_obs(obs: dict) -> np.ndarray:
-    state = []
-    for i in range(1, 7):
-        state.append(float(obs.get(f"joint_{i}.pos", 0.0)))
-    state.append(float(obs.get("gripper.pos", 0.0)))
-    return np.asarray(state, dtype=np.float32)
+def obs_to_state(obs: dict) -> np.ndarray:
+    return np.array([
+        obs["tcp_pos.x"], obs["tcp_pos.y"], obs["tcp_pos.z"],
+        obs["tcp_pos.r"], obs["tcp_pos.p"], obs["tcp_pos.yaw"],
+        obs["joint.q0"],  obs["joint.q1"],  obs["joint.q2"],
+        obs["joint.q3"],  obs["joint.q4"],  obs["joint.q5"],
+        obs["gripper.pos"],
+    ], dtype=np.float32)
 
 def prepare_obs_dict(obs: dict) -> dict:
     images = {}
@@ -29,26 +31,24 @@ def prepare_obs_dict(obs: dict) -> dict:
             img = np.expand_dims(img, 0)        # B, C, H, W
             images[key] = img
 
-    add_img("wrist")
     add_img("scene")
 
     obs_dict = {
-        "observation.images.image": images.get("wrist"),
-        "observation.images.image2": images.get("scene"),
-        "observation.state": pack_state_from_robot_obs(obs),
+        "observation.images.image": images.get("scene"),
+        "observation.state": obs_to_state(obs),
         "task": TASK_DESCRIPTION,
     }
 
     return obs_dict
 
 
-robot = ur5e_joints.UR5e(
-    ur5e_cfg.UR5eConfig(
-        cameras={
-            "wrist": OpenCVCameraConfig(index_or_path="/dev/video4", width=424, height=240, fps=15),
-            "scene": OpenCVCameraConfig(index_or_path="/dev/video6", width=432, height=240, fps=15),        },
+robot = ur5e.UR5e(
+        config_ur5e.UR5eConfig(
+            cameras={
+                "scene": OpenCVCameraConfig(index_or_path=0, width=432, height=240, fps=FPS),
+            },
+        )
     )
-)
 robot.connect()
 print("[Robot] Connected")
 print(robot.cameras)
@@ -75,8 +75,12 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         actions = pickle.loads(data)
 
         # 4. Send actions to robot
-        for a in actions[0]:
-            robot.send_action(a)
+        for a in actions[0][:10]:
+            action_dict = {f"joint.q{i}": float(a[i]) for i in range(6)}
+            action_dict["gripper.pos"] = float(a[6])
+
+            robot.send_action(action_dict)
+            time.sleep(1/FPS)
 
 
 
